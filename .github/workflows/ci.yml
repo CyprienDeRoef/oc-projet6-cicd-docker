@@ -181,6 +181,10 @@ jobs:
           distribution: "temurin"
           cache: "gradle"
 
+      - name: Rendre gradlew exécutable
+        working-directory: ${{ env.WORKING_DIR }}
+        run: chmod +x gradlew
+
       - name: Build du WAR
         working-directory: ${{ env.WORKING_DIR }}
         run: ./gradlew bootWar --no-daemon
