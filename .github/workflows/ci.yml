@@ -11,10 +11,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   checks: write
   pull-requests: write
   packages: write
+  issues: write
 
 env:
   JAVA_VERSION: "21"
@@ -414,3 +415,92 @@ jobs:
             exit 1
           fi
           echo "✅ Tous les tests ont réussi"
+
+  # Job 9: Release avec Semantic Release
+  release:
+    name: Semantic Release
+    runs-on: ubuntu-latest
+    needs: [docker-backend, docker-frontend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    outputs:
+      new_release_published: ${{ steps.semantic.outputs.new_release_published }}
+      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configuration de Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Installation de semantic-release
+        run: |
+          npm install -g \
+            semantic-release@23 \
+            @semantic-release/git@10 \
+            @semantic-release/github@10 \
+            @semantic-release/changelog@6 \
+            conventional-changelog-conventionalcommits@7
+
+      - name: Exécution de semantic-release
+        id: semantic
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx semantic-release
+
+      - name: Résumé de la release
+        if: steps.semantic.outputs.new_release_published == 'true'
+        run: |
+          echo "### 🎉 Nouvelle Release Publiée" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`v${{ steps.semantic.outputs.new_release_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Notes:** ${{ steps.semantic.outputs.new_release_notes }}" >> $GITHUB_STEP_SUMMARY
+
+  # Job 10: Tag des images Docker avec la version sémantique
+  docker-tag-release:
+    name: Tag Docker avec version sémantique
+    runs-on: ubuntu-latest
+    needs: release
+    if: needs.release.outputs.new_release_published == 'true'
+
+    steps:
+      - name: Connexion au GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag Backend avec version sémantique
+        run: |
+          VERSION=${{ needs.release.outputs.new_release_version }}
+          docker pull ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:main-${{ github.sha }}
+          docker tag ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:main-${{ github.sha }} \
+            ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:v${VERSION}
+          docker push ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:v${VERSION}
+          echo "✅ Backend image taguée: v${VERSION}"
+
+      - name: Tag Frontend avec version sémantique
+        run: |
+          VERSION=${{ needs.release.outputs.new_release_version }}
+          docker pull ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:main-${{ github.sha }}
+          docker tag ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:main-${{ github.sha }} \
+            ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:v${VERSION}
+          docker push ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:v${VERSION}
+          echo "✅ Frontend image taguée: v${VERSION}"
+
+      - name: Résumé des tags Docker
+        run: |
+          echo "### 🏷️ Images Docker Taguées avec v${{ needs.release.outputs.new_release_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Pull des images avec version:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:v${{ needs.release.outputs.new_release_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:v${{ needs.release.outputs.new_release_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
