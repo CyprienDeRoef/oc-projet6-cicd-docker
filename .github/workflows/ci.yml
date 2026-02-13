@@ -10,6 +10,11 @@ on:
     branches: [main, develop]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
 env:
   JAVA_VERSION: "21"
   NODE_VERSION: "20"
@@ -68,6 +73,7 @@ jobs:
 
       - name: Publication du rapport de tests Backend
         if: always()
+        continue-on-error: true
         uses: dorny/test-reporter@v1
         with:
           name: Tests Backend - Résultats
@@ -135,6 +141,7 @@ jobs:
 
       - name: Publication du rapport de tests Frontend
         if: always()
+        continue-on-error: true
         uses: dorny/test-reporter@v1
         with:
           name: Tests Frontend - Résultats
