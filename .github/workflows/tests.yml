@@ -1,0 +1,54 @@
+name: Tests Automatiques
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    name: Exécuter les tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Configuration de Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: "gradle"
+
+      - name: Configuration de Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: front/package-lock.json
+
+      - name: Rendre le script exécutable
+        run: chmod +x run-tests.sh
+
+      - name: Exécuter les tests
+        run: bash run-tests.sh
+
+      - name: Upload des rapports de tests
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: test-results/
+          retention-days: 30
+
+      - name: Publication du rapport de tests
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Résultats des Tests
+          path: "test-results/**/*.xml"
+          reporter: java-junit
+          fail-on-error: true
+          max-annotations: 10

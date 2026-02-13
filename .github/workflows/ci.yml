@@ -1,0 +1,275 @@
+name: CI - Build & Test
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - "**.md"
+      - ".gitignore"
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  JAVA_VERSION: "21"
+  NODE_VERSION: "20"
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+
+jobs:
+  # Job 1: Tests Backend (Gradle)
+  test-backend:
+    name: Tests Backend (Java/Gradle)
+    runs-on: ubuntu-latest
+
+    env:
+      WORKING_DIR: ./back
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Configuration de Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: "temurin"
+          cache: "gradle"
+
+      - name: Vérification de la version Java
+        run: java -version
+
+      - name: Rendre gradlew exécutable
+        working-directory: ${{ env.WORKING_DIR }}
+        run: chmod +x gradlew
+
+      - name: Compilation du projet
+        working-directory: ${{ env.WORKING_DIR }}
+        run: ./gradlew clean compileJava --no-daemon --info
+
+      - name: Exécution des tests unitaires
+        working-directory: ${{ env.WORKING_DIR }}
+        run: ./gradlew test --no-daemon --info
+
+      - name: Génération du rapport de couverture
+        if: success()
+        working-directory: ${{ env.WORKING_DIR }}
+        run: ./gradlew jacocoTestReport --no-daemon || true
+
+      - name: Upload des rapports de tests Backend
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          path: |
+            back/build/test-results/test/
+            back/build/reports/tests/
+            back/build/reports/jacoco/
+          retention-days: 30
+
+      - name: Publication du rapport de tests Backend
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Tests Backend - Résultats
+          path: back/build/test-results/test/*.xml
+          reporter: java-junit
+          fail-on-error: true
+          max-annotations: 10
+
+      - name: Résumé des tests
+        if: always()
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          echo "### 🧪 Résultats des tests Backend" >> $GITHUB_STEP_SUMMARY
+          if [ -d "build/test-results/test" ]; then
+            TEST_COUNT=$(find build/test-results/test -name "*.xml" | wc -l)
+            echo "- Fichiers de tests trouvés: $TEST_COUNT" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Job 2: Tests Frontend (npm)
+  test-frontend:
+    name: Tests Frontend (Angular/npm)
+    runs-on: ubuntu-latest
+
+    env:
+      WORKING_DIR: ./front
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Configuration de Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: front/package-lock.json
+
+      - name: Vérification de la version Node
+        run: |
+          node --version
+          npm --version
+
+      - name: Installation des dépendances
+        working-directory: ${{ env.WORKING_DIR }}
+        run: npm ci --prefer-offline --cache .npm
+
+      - name: Vérification de la syntaxe (Lint)
+        working-directory: ${{ env.WORKING_DIR }}
+        run: npm run lint || echo "Lint non configuré"
+        continue-on-error: true
+
+      - name: Exécution des tests unitaires
+        working-directory: ${{ env.WORKING_DIR }}
+        run: npm test -- --watch=false --code-coverage=false --browsers=ChromeHeadless
+
+      - name: Upload des rapports de tests Frontend
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-test-reports
+          path: |
+            front/reports/
+            front/coverage/
+          retention-days: 30
+
+      - name: Publication du rapport de tests Frontend
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Tests Frontend - Résultats
+          path: front/reports/*.xml
+          reporter: java-junit
+          fail-on-error: true
+          max-annotations: 10
+
+      - name: Résumé des tests
+        if: always()
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          echo "### 🧪 Résultats des tests Frontend" >> $GITHUB_STEP_SUMMARY
+          if [ -d "reports" ]; then
+            TEST_COUNT=$(find reports -name "*.xml" | wc -l)
+            echo "- Fichiers de tests trouvés: $TEST_COUNT" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Job 3: Build Backend
+  build-backend:
+    name: Build Backend (WAR)
+    runs-on: ubuntu-latest
+    needs: test-backend
+    if: success()
+
+    env:
+      WORKING_DIR: ./back
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Configuration de Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: "temurin"
+          cache: "gradle"
+
+      - name: Build du WAR
+        working-directory: ${{ env.WORKING_DIR }}
+        run: ./gradlew bootWar --no-daemon
+
+      - name: Upload de l'artifact Backend
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-war
+          path: back/build/libs/*.war
+          retention-days: 7
+
+  # Job 4: Build Frontend
+  build-frontend:
+    name: Build Frontend (Angular)
+    runs-on: ubuntu-latest
+    needs: test-frontend
+    if: success()
+
+    env:
+      WORKING_DIR: ./front
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Configuration de Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: front/package-lock.json
+
+      - name: Installation des dépendances
+        working-directory: ${{ env.WORKING_DIR }}
+        run: npm ci --prefer-offline
+
+      - name: Build de production
+        working-directory: ${{ env.WORKING_DIR }}
+        run: npm run build --prod
+
+      - name: Upload de l'artifact Frontend
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: front/dist/
+          retention-days: 7
+
+  # Job 5: Rapport global
+  test-summary:
+    name: Résumé des tests
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-frontend]
+    if: always()
+
+    steps:
+      - name: Téléchargement des rapports Backend
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-test-reports
+          path: reports/backend
+        continue-on-error: true
+
+      - name: Téléchargement des rapports Frontend
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-test-reports
+          path: reports/frontend
+        continue-on-error: true
+
+      - name: Génération du résumé global
+        run: |
+          echo "# 📊 Résumé des Tests CI" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Backend (Java/Gradle)" >> $GITHUB_STEP_SUMMARY
+          if [ -d "reports/backend" ]; then
+            BACKEND_TESTS=$(find reports/backend -name "*.xml" 2>/dev/null | wc -l)
+            echo "✅ Fichiers de tests: $BACKEND_TESTS" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Rapports non disponibles" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Frontend (Angular/npm)" >> $GITHUB_STEP_SUMMARY
+          if [ -d "reports/frontend" ]; then
+            FRONTEND_TESTS=$(find reports/frontend -name "*.xml" 2>/dev/null | wc -l)
+            echo "✅ Fichiers de tests: $FRONTEND_TESTS" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Rapports non disponibles" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "Workflow exécuté le: $(date)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Vérification du statut
+        run: |
+          if [ "${{ needs.test-backend.result }}" != "success" ] || [ "${{ needs.test-frontend.result }}" != "success" ]; then
+            echo "❌ Certains tests ont échoué"
+            exit 1
+          fi
+          echo "✅ Tous les tests ont réussi"

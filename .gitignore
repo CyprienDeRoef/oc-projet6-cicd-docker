@@ -1,0 +1,51 @@
+# Résultats des tests
+test-results/
+
+# Scripts Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Node modules (Frontend)
+front/node_modules/
+front/dist/
+front/.angular/
+front/coverage/
+front/reports/
+front/.npm/
+
+# Gradle (Backend)
+back/.gradle/
+back/build/
+back/bin/
+back/.classpath
+back/.project
+back/.settings/
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+
+# Système d'exploitation
+.DS_Store
+Thumbs.db
+
+# Fichiers temporaires
+*.log
+*.tmp
+*.swp
+*~
+
+# Environnement
+.env
+.env.local
+*.pem
+*.key
+
+# Tokens et secrets
+token.txt
